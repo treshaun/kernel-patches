@@ -1,0 +1,55 @@
+From d51e9ee0f6c1e8b4981124fbdf89fbd7c154b138 Mon Sep 17 00:00:00 2001
+From: treshaun <71833988+treshaun@users.noreply.github.com>
+Date: Mon, 9 Nov 2026 03:28:30 +0100
+Subject: [PATCH] platform: skip unsupported sensor limit updates
+
+firmware may request a limit update while only advertising one sensor.
+check each counter before invalidating or updating it, including before
+sensor registration. preserve shared sampling and real error handling.
+
+Signed-off-by: treshaun <71833988+treshaun@users.noreply.github.com>
+---
+ .../platform/platform_request_handler_ctrl.c       | 25 ++++++++++++++++------
+ 1 file changed, 19 insertions(+), 6 deletions(-)
+
+diff --git a/src/nvidia/src/kernel/platform/platform_request_handler_ctrl.c b/src/nvidia/src/kernel/platform/platform_request_handler_ctrl.c
+index 3732a2fd..bdc1bf5a 100644
+--- a/src/nvidia/src/kernel/platform/platform_request_handler_ctrl.c
++++ b/src/nvidia/src/kernel/platform/platform_request_handler_ctrl.c
+@@ -2467,17 +2467,30 @@ _pfmreqhndlrCallPshareStatus
+ 
+         if (pPfmreqhndlrData->PFMREQHNDLRACPIData.bSystemParamLimitUpdate)
+         {
++            NvBool bTgpuSupported = pPfmreqhndlrData->PFMREQHNDLRSensorCache[PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_TGPU_SENSOR)].bSupported;
++            NvBool bPpmdSupported = PFM_REQ_HNDLR_IS_ACPI_VERSION_SW_2X(pPlatformRequestHandler) &&
++                pPfmreqhndlrData->PFMREQHNDLRSensorCache[PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_PPMD_SENSOR)].bSupported;
++
+             timeStamp = _pfmreqhndlrGetTimeStamp(pPlatformRequestHandler);
+-            _pfmreqhndlrResetCounter(pPfmreqhndlrData, PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_TGPU_SENSOR), timeStamp);
+-            _pfmreqhndlrResetCounter(pPfmreqhndlrData, PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_PPMD_SENSOR), timeStamp);
++            if (bTgpuSupported)
++            {
++                _pfmreqhndlrResetCounter(pPfmreqhndlrData, PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_TGPU_SENSOR), timeStamp);
++            }
++            if (bPpmdSupported)
++            {
++                _pfmreqhndlrResetCounter(pPfmreqhndlrData, PFM_REQ_HNDLR_LIMIT(PFM_REQ_HNDLR_PPMD_SENSOR), timeStamp);
++            }
+ 
+-            lclStatus = _pfmreqhndlrUpdateTgpuLimit(pPlatformRequestHandler, pGpu);
+-            if ((NV_OK == status) && (NV_ERR_NOT_SUPPORTED != lclStatus))
++            if (bTgpuSupported)
+             {
+-                status = lclStatus;
++                lclStatus = _pfmreqhndlrUpdateTgpuLimit(pPlatformRequestHandler, pGpu);
++                if ((NV_OK == status) && (NV_ERR_NOT_SUPPORTED != lclStatus))
++                {
++                    status = lclStatus;
++                }
+             }
+ 
+-            if (PFM_REQ_HNDLR_IS_ACPI_VERSION_SW_2X(pPlatformRequestHandler))
++            if (bPpmdSupported)
+             {
+                 // Run time PPMD update from the system
+                 lclStatus = _pfmreqhndlrUpdatePpmdLimit(pPlatformRequestHandler, pGpu, NV_FALSE);
